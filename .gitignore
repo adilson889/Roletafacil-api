@@ -1,0 +1,62 @@
+# Dependências
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Arquivos de ambiente
+.env
+.env.local
+.env.*.local
+.env.production
+
+# Logs
+logs/
+*.log
+log.txt
+
+# Arquivos de sistema operacional
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editores/IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# Arquivos de build/temp
+dist/
+build/
+tmp/
+temp/
+*.tmp
+
+# Cobertura de testes
+coverage/
+.nyc_output/
+
+# Configurações locais do Vercel
+.vercel/
+
+# Arquivos de backup
+*.bak
+*.backup
+
+# Dumps de banco de dados (se houver)
+*.sql
+*.dump
+
+# Arquivos específicos da API
+api/uploads/
+api/temp/
+
+# Certificados SSL locais
+*.pem
+*.key
+*.cert
