@@ -55,4 +55,25 @@ router.get('/', authMiddleware, async (req, res) => {
     res.json(result.rows)
 })
 
+// PATCH /users/pin — definir ou alterar PIN de saque
+router.patch('/pin', authMiddleware, async (req, res) => {
+    const { pin, password } = req.body
+
+    if (!pin || !/^\d{6}$/.test(pin))
+        return res.status(400).json({ error: 'PIN deve ter exactamente 6 digitos' })
+    if (!password)
+        return res.status(400).json({ error: 'Confirma com a tua senha' })
+
+    const result = await db.query('SELECT * FROM users WHERE id = $1', [req.user.id])
+    const user = result.rows[0]
+
+    const senhaOk = await bcrypt.compare(password, user.password)
+    if (!senhaOk) return res.status(401).json({ error: 'Senha incorreta' })
+
+    const pin_hash = await bcrypt.hash(pin, 10)
+    await db.query('UPDATE users SET pin_hash = $1 WHERE id = $2', [pin_hash, req.user.id])
+
+    res.json({ ok: true })
+})
+
 module.exports = router
