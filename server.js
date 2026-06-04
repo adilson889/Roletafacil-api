@@ -5,6 +5,7 @@ const helmet     = require('helmet')
 const rateLimit  = require('express-rate-limit')
 
 const authRoutes         = require('./routes/auth')
+const gameRoutes = require('./routes/game')
 const depositRoutes      = require('./routes/deposits')
 const withdrawalRoutes   = require('./routes/withdrawals')
 const notificationRoutes = require('./routes/notifications')
@@ -24,6 +25,7 @@ app.use('/withdrawals',   withdrawalRoutes)
 app.use('/notifications', notificationRoutes)
 app.use('/admin',         adminRoutes)
 app.use('/users', userRoutes)
+app.use('/game', gameRoutes)
 
 app.get('/health', (_, res) => res.json({ status: 'ok' }))
 
