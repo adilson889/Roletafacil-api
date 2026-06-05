@@ -1,4 +1,3 @@
-// ─── routes/admin.js ─────────────────────────────────────────────────────────
 const router = require('express').Router()
 const db     = require('../db')
 const { adminMiddleware } = require('../middleware/auth')
@@ -13,13 +12,13 @@ router.get('/dashboard', adminMiddleware, async (req, res) => {
     ])
 
     res.json({
-        total_users:            parseInt(users.rows[0].count),
-        approved_deposits:      parseInt(deposits.rows[0].count),
-        approved_deposits_kz:   parseInt(deposits.rows[0].sum || 0),
-        approved_withdrawals:   parseInt(withdrawals.rows[0].count),
-        approved_withdrawals_kz:parseInt(withdrawals.rows[0].sum || 0),
-        total_games:            parseInt(games.rows[0].count),
-        total_payout_kz:        parseInt(games.rows[0].sum || 0)
+        total_users:             parseInt(users.rows[0].count),
+        approved_deposits:       parseInt(deposits.rows[0].count),
+        approved_deposits_kz:    parseInt(deposits.rows[0].sum || 0),
+        approved_withdrawals:    parseInt(withdrawals.rows[0].count),
+        approved_withdrawals_kz: parseInt(withdrawals.rows[0].sum || 0),
+        total_games:             parseInt(games.rows[0].count),
+        total_payout_kz:         parseInt(games.rows[0].sum || 0)
     })
 })
 
@@ -37,7 +36,7 @@ router.get('/deposits', adminMiddleware, async (req, res) => {
 
 // PATCH /admin/deposits/:id — aprovar ou rejeitar
 router.patch('/deposits/:id', adminMiddleware, async (req, res) => {
-    const { action, notes } = req.body  // action: 'approve' | 'reject'
+    const { action, notes } = req.body
     if (!['approve', 'reject'].includes(action))
         return res.status(400).json({ error: 'Acao invalida' })
 
@@ -62,6 +61,38 @@ router.patch('/deposits/:id', adminMiddleware, async (req, res) => {
              VALUES ($1, $2, $3, 'success')`,
             [deposit.user_id, 'Deposito aprovado', `${deposit.amount} KZ adicionados ao seu saldo.`]
         )
+
+        // Bonus de referido
+        const userResult = await db.query(
+            'SELECT referred_by FROM users WHERE id = $1',
+            [deposit.user_id]
+        )
+        const referredBy = userResult.rows[0]?.referred_by
+
+        if (referredBy) {
+            const depositosAprovados = await db.query(
+                `SELECT COUNT(*) FROM deposits WHERE user_id = $1 AND status = 'approved'`,
+                [deposit.user_id]
+            )
+            const totalDepositos = parseInt(depositosAprovados.rows[0].count)
+
+            const bonus3pct  = Math.floor(deposit.amount * 0.03)
+            const bonus100   = totalDepositos === 1 ? 100 : 0
+            const totalBonus = bonus3pct + bonus100
+
+            if (totalBonus > 0) {
+                await db.query(
+                    'UPDATE users SET balance = balance + $1 WHERE id = $2',
+                    [totalBonus, referredBy]
+                )
+                await db.query(
+                    `INSERT INTO notifications (user_id, title, body, type)
+                     VALUES ($1, 'Bonus de indicacao', $2, 'info')`,
+                    [referredBy, `Recebeste ${totalBonus} KZ pelo deposito do teu indicado.`]
+                )
+            }
+        }
+
     } else {
         await db.query(
             `INSERT INTO notifications (user_id, title, body, type)
@@ -97,13 +128,11 @@ router.patch('/withdrawals/:id', adminMiddleware, async (req, res) => {
 
     const withdrawal = wd.rows[0]
 
-    // Verificar expiração
     if (action === 'approve' && new Date() > new Date(withdrawal.expires_at)) {
         await db.query(
             `UPDATE withdrawals SET status = 'rejected', resolved_at = NOW() WHERE id = $1`,
             [withdrawal.id]
         )
-        // Devolver saldo
         await db.query(
             'UPDATE users SET balance = balance + $1 WHERE id = $2',
             [withdrawal.amount, withdrawal.user_id]
@@ -123,7 +152,6 @@ router.patch('/withdrawals/:id', adminMiddleware, async (req, res) => {
     )
 
     if (action === 'reject') {
-        // Devolver saldo se rejeitado
         await db.query(
             'UPDATE users SET balance = balance + $1 WHERE id = $2',
             [withdrawal.amount, withdrawal.user_id]
