@@ -1,4 +1,3 @@
-// ─── routes/auth.js ──────────────────────────────────────────────────────────
 const router  = require('express').Router()
 const bcrypt  = require('bcrypt')
 const jwt     = require('jsonwebtoken')
@@ -10,7 +9,7 @@ function gerarPublicId(id) {
 
 // POST /auth/register
 router.post('/register', async (req, res) => {
-    const { name, password, phone } = req.body
+    const { name, password, phone, referral_code } = req.body
 
     if (!name?.trim() || !password)
         return res.status(400).json({ error: 'Nome e senha obrigatorios' })
@@ -20,11 +19,23 @@ router.post('/register', async (req, res) => {
     try {
         const hash = await bcrypt.hash(password, 12)
 
-        // Inserir com public_id temporario, depois actualizar com o ID real
+        // Verificar código de convite
+        let referredBy = null
+        if (referral_code?.trim()) {
+            const refResult = await db.query(
+                'SELECT id FROM users WHERE referral_code = $1',
+                [referral_code.trim().toUpperCase()]
+            )
+            if (refResult.rows.length > 0) referredBy = refResult.rows[0].id
+        }
+
+        // Gerar código de referido único
+        const refCode = Math.random().toString(36).substring(2, 10).toUpperCase()
+
         const result = await db.query(
-            `INSERT INTO users (name, password, phone, public_id)
-             VALUES ($1, $2, $3, 'RF-TMP') RETURNING id`,
-            [name.trim(), hash, phone?.trim() || null]
+            `INSERT INTO users (name, password, phone, public_id, referral_code, referred_by)
+             VALUES ($1, $2, $3, 'RF-TMP', $4, $5) RETURNING id`,
+            [name.trim(), hash, phone?.trim() || null, refCode, referredBy]
         )
 
         const userId   = result.rows[0].id
