@@ -1,9 +1,7 @@
-// ─── routes/notifications.js ─────────────────────────────────────────────────
 const router = require('express').Router()
 const db     = require('../db')
 const { authMiddleware, adminMiddleware } = require('../middleware/auth')
 
-// GET /notifications — listar as do utilizador + broadcasts
 router.get('/', authMiddleware, async (req, res) => {
     const result = await db.query(
         `SELECT * FROM notifications
@@ -14,7 +12,6 @@ router.get('/', authMiddleware, async (req, res) => {
     res.json(result.rows)
 })
 
-// GET /notifications/unread-count
 router.get('/unread-count', authMiddleware, async (req, res) => {
     const result = await db.query(
         `SELECT COUNT(*) FROM notifications
@@ -24,7 +21,15 @@ router.get('/unread-count', authMiddleware, async (req, res) => {
     res.json({ count: parseInt(result.rows[0].count) })
 })
 
-// PATCH /notifications/:id/read
+router.get('/promos', authMiddleware, async (req, res) => {
+    const result = await db.query(
+        `SELECT * FROM notifications
+         WHERE type = 'promo' AND (user_id IS NULL)
+         ORDER BY created_at DESC LIMIT 10`
+    )
+    res.json(result.rows)
+})
+
 router.patch('/:id/read', authMiddleware, async (req, res) => {
     await db.query(
         `UPDATE notifications SET is_read = true
@@ -34,7 +39,6 @@ router.patch('/:id/read', authMiddleware, async (req, res) => {
     res.json({ ok: true })
 })
 
-// PATCH /notifications/read-all
 router.patch('/read-all', authMiddleware, async (req, res) => {
     await db.query(
         `UPDATE notifications SET is_read = true
@@ -44,16 +48,15 @@ router.patch('/read-all', authMiddleware, async (req, res) => {
     res.json({ ok: true })
 })
 
-// POST /notifications/broadcast — admin envia para todos
 router.post('/broadcast', adminMiddleware, async (req, res) => {
-    const { title, body, type } = req.body
+    const { title, body, type, image_url } = req.body
     if (!title || !body)
         return res.status(400).json({ error: 'Titulo e corpo obrigatorios' })
 
     const result = await db.query(
-        `INSERT INTO notifications (user_id, title, body, type)
-         VALUES (NULL, $1, $2, $3) RETURNING *`,
-        [title, body, type || 'info']
+        `INSERT INTO notifications (user_id, title, body, type, image_url)
+         VALUES (NULL, $1, $2, $3, $4) RETURNING *`,
+        [title, body, type || 'info', image_url || null]
     )
     res.status(201).json(result.rows[0])
 })
