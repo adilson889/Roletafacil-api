@@ -1,10 +1,8 @@
-// ─── routes/withdrawals.js ───────────────────────────────────────────────────
 const router = require('express').Router()
 const bcrypt = require('bcrypt')
 const db     = require('../db')
 const { authMiddleware } = require('../middleware/auth')
 
-// POST /withdrawals — utilizador pede saque
 router.post('/', authMiddleware, async (req, res) => {
     const { amount, phone, pin } = req.body
 
@@ -15,7 +13,6 @@ router.post('/', authMiddleware, async (req, res) => {
     if (!pin || !/^\d{6}$/.test(pin))
         return res.status(400).json({ error: 'PIN invalido' })
 
-    // Verificar PIN
     const userResult = await db.query('SELECT * FROM users WHERE id = $1', [req.user.id])
     const user = userResult.rows[0]
 
@@ -28,25 +25,31 @@ router.post('/', authMiddleware, async (req, res) => {
     if (user.balance < amount)
         return res.status(400).json({ error: 'Saldo insuficiente' })
 
-    // Deduzir saldo e criar pedido
+    // ── Regra: tem de jogar pelo menos o valor total depositado ──
+    const totalDep = parseInt(user.total_deposited || 0)
+    const totalWag = parseInt(user.total_wagered   || 0)
+    if (totalWag < totalDep) {
+        const falta = totalDep - totalWag
+        return res.status(400).json({
+            error: `Tens de jogar mais ${falta} KZ antes de poder sacar`
+        })
+    }
+
     await db.query('UPDATE users SET balance = balance - $1 WHERE id = $2', [amount, user.id])
 
     const result = await db.query(
-        `INSERT INTO withdrawals (user_id, amount, phone)
-         VALUES ($1, $2, $3) RETURNING *`,
+        `INSERT INTO withdrawals (user_id, amount, phone) VALUES ($1, $2, $3) RETURNING *`,
         [user.id, amount, phone.trim()]
     )
 
     await db.query(
-        `INSERT INTO notifications (user_id, title, body, type)
-         VALUES ($1, $2, $3, 'info')`,
+        `INSERT INTO notifications (user_id, title, body, type) VALUES ($1, $2, $3, 'info')`,
         [user.id, 'Saque solicitado', `Saque de ${amount} KZ em processamento. Prazo maximo: 5 horas.`]
     )
 
     res.status(201).json(result.rows[0])
 })
 
-// GET /withdrawals — historico
 router.get('/', authMiddleware, async (req, res) => {
     const result = await db.query(
         'SELECT * FROM withdrawals WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50',
@@ -55,7 +58,6 @@ router.get('/', authMiddleware, async (req, res) => {
     res.json(result.rows)
 })
 
-// PATCH /users/pin — definir ou alterar PIN de saque
 router.patch('/pin', authMiddleware, async (req, res) => {
     const { pin, password } = req.body
 
