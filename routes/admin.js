@@ -2,7 +2,6 @@ const router = require('express').Router()
 const db     = require('../db')
 const { adminMiddleware } = require('../middleware/auth')
 
-// ── GET /admin/dashboard ──────────────────────────────────────────────────
 router.get('/dashboard', adminMiddleware, async (req, res) => {
     const [users, deposits, withdrawals, games] = await Promise.all([
         db.query('SELECT COUNT(*) FROM users WHERE is_admin = false'),
@@ -21,18 +20,15 @@ router.get('/dashboard', adminMiddleware, async (req, res) => {
     })
 })
 
-// ── GET /admin/stats/overview ─────────────────────────────────────────────
 router.get('/stats/overview', adminMiddleware, async (req, res) => {
     const days = Math.min(parseInt(req.query.days) || 30, 90)
     const [jogos, financeiro, porJogo, pendentes] = await Promise.all([
         db.query(`
-            SELECT
-                DATE_TRUNC('day', created_at AT TIME ZONE 'UTC') AS dia,
-                jogo,
-                COUNT(*)                                                      AS partidas,
-                SUM(ABS(CASE WHEN delta < 0 THEN delta ELSE 0 END))           AS receita_casa,
-                SUM(CASE WHEN delta > 0 THEN delta ELSE 0 END)                AS pago_jogadores,
-                SUM(-delta)                                                    AS lucro_liquido
+            SELECT DATE_TRUNC('day', created_at AT TIME ZONE 'UTC') AS dia, jogo,
+                COUNT(*) AS partidas,
+                SUM(ABS(CASE WHEN delta < 0 THEN delta ELSE 0 END)) AS receita_casa,
+                SUM(CASE WHEN delta > 0 THEN delta ELSE 0 END)       AS pago_jogadores,
+                SUM(-delta)                                           AS lucro_liquido
             FROM game_history
             WHERE created_at >= NOW() - ($1 || ' days')::INTERVAL
             GROUP BY dia, jogo ORDER BY dia ASC
@@ -75,21 +71,20 @@ router.get('/stats/overview', adminMiddleware, async (req, res) => {
     }
 
     res.json({
-        serie:        Object.values(diasMap).sort((a, b) => a.dia.localeCompare(b.dia)),
-        por_jogo:     porJogo.rows,
-        pendentes:    pendentes.rows[0],
+        serie: Object.values(diasMap).sort((a, b) => a.dia.localeCompare(b.dia)),
+        por_jogo: porJogo.rows,
+        pendentes: pendentes.rows[0],
         periodo_dias: days
     })
 })
 
-// ── GET /admin/stats/top-players ──────────────────────────────────────────
 router.get('/stats/top-players', adminMiddleware, async (req, res) => {
     const result = await db.query(`
         SELECT u.name, u.public_id, u.balance,
-            COUNT(g.id)                                              AS partidas,
-            SUM(ABS(g.delta))                                        AS volume_apostado,
+            COUNT(g.id) AS partidas,
+            SUM(ABS(g.delta)) AS volume_apostado,
             SUM(ABS(CASE WHEN g.delta < 0 THEN g.delta ELSE 0 END)) AS receita_gerada,
-            SUM(CASE WHEN g.delta > 0 THEN g.delta ELSE 0 END)       AS ganhos_do_jogador
+            SUM(CASE WHEN g.delta > 0 THEN g.delta ELSE 0 END) AS ganhos_do_jogador
         FROM game_history g JOIN users u ON u.id = g.user_id
         GROUP BY u.id, u.name, u.public_id, u.balance
         ORDER BY receita_gerada DESC LIMIT 20
@@ -97,7 +92,6 @@ router.get('/stats/top-players', adminMiddleware, async (req, res) => {
     res.json(result.rows)
 })
 
-// ── GET /admin/deposits ───────────────────────────────────────────────────
 router.get('/deposits', adminMiddleware, async (req, res) => {
     const status = req.query.status || 'pending'
     const result = await db.query(
@@ -108,7 +102,6 @@ router.get('/deposits', adminMiddleware, async (req, res) => {
     res.json(result.rows)
 })
 
-// ── PATCH /admin/deposits/:id ─────────────────────────────────────────────
 router.patch('/deposits/:id', adminMiddleware, async (req, res) => {
     const { action, notes } = req.body
     if (!['approve', 'reject'].includes(action))
@@ -122,16 +115,20 @@ router.patch('/deposits/:id', adminMiddleware, async (req, res) => {
     await db.query(`UPDATE deposits SET status = $1, notes = $2, resolved_at = NOW() WHERE id = $3`, [status, notes || null, deposit.id])
 
     if (action === 'approve') {
-        await db.query('UPDATE users SET balance = balance + $1 WHERE id = $2', [deposit.amount, deposit.user_id])
+        // Creditar saldo E incrementar total_deposited
+        await db.query(
+            'UPDATE users SET balance = balance + $1, total_deposited = COALESCE(total_deposited, 0) + $1 WHERE id = $2',
+            [deposit.amount, deposit.user_id]
+        )
         await db.query(`INSERT INTO notifications (user_id, title, body, type) VALUES ($1, $2, $3, 'success')`,
             [deposit.user_id, 'Deposito aprovado', `${deposit.amount} KZ adicionados ao seu saldo.`])
 
         const userResult = await db.query('SELECT referred_by FROM users WHERE id = $1', [deposit.user_id])
         const referredBy = userResult.rows[0]?.referred_by
         if (referredBy) {
-            const totalDeps  = await db.query(`SELECT COUNT(*) FROM deposits WHERE user_id = $1 AND status = 'approved'`, [deposit.user_id])
-            const bonus3pct  = Math.floor(deposit.amount * 0.03)
-            const bonus100   = parseInt(totalDeps.rows[0].count) === 1 ? 100 : 0
+            const totalDeps = await db.query(`SELECT COUNT(*) FROM deposits WHERE user_id = $1 AND status = 'approved'`, [deposit.user_id])
+            const bonus3pct = Math.floor(deposit.amount * 0.03)
+            const bonus100  = parseInt(totalDeps.rows[0].count) === 1 ? 100 : 0
             const totalBonus = bonus3pct + bonus100
             if (totalBonus > 0) {
                 await db.query('UPDATE users SET balance = balance + $1 WHERE id = $2', [totalBonus, referredBy])
@@ -146,14 +143,12 @@ router.patch('/deposits/:id', adminMiddleware, async (req, res) => {
     res.json({ ok: true, status })
 })
 
-// ── DELETE /admin/deposits/:id ────────────────────────────────────────────
 router.delete('/deposits/:id', adminMiddleware, async (req, res) => {
     const result = await db.query('DELETE FROM deposits WHERE id = $1 RETURNING id', [req.params.id])
     if (!result.rows[0]) return res.status(404).json({ error: 'Deposito nao encontrado' })
     res.json({ ok: true })
 })
 
-// ── GET /admin/withdrawals ────────────────────────────────────────────────
 router.get('/withdrawals', adminMiddleware, async (req, res) => {
     const status = req.query.status || 'pending'
     const result = await db.query(
@@ -164,7 +159,6 @@ router.get('/withdrawals', adminMiddleware, async (req, res) => {
     res.json(result.rows)
 })
 
-// ── PATCH /admin/withdrawals/:id ──────────────────────────────────────────
 router.patch('/withdrawals/:id', adminMiddleware, async (req, res) => {
     const { action, notes } = req.body
     if (!['approve', 'reject'].includes(action))
@@ -195,14 +189,12 @@ router.patch('/withdrawals/:id', adminMiddleware, async (req, res) => {
     res.json({ ok: true, status })
 })
 
-// ── DELETE /admin/withdrawals/:id ─────────────────────────────────────────
 router.delete('/withdrawals/:id', adminMiddleware, async (req, res) => {
     const result = await db.query('DELETE FROM withdrawals WHERE id = $1 RETURNING id', [req.params.id])
     if (!result.rows[0]) return res.status(404).json({ error: 'Saque nao encontrado' })
     res.json({ ok: true })
 })
 
-// ── GET /admin/users ──────────────────────────────────────────────────────
 router.get('/users', adminMiddleware, async (req, res) => {
     const result = await db.query(
         `SELECT id, public_id, name, phone, balance, is_blocked, created_at
@@ -211,7 +203,6 @@ router.get('/users', adminMiddleware, async (req, res) => {
     res.json(result.rows)
 })
 
-// ── PATCH /admin/users/:id/block ──────────────────────────────────────────
 router.patch('/users/:id/block', adminMiddleware, async (req, res) => {
     if (parseInt(req.params.id) === req.user.id)
         return res.status(403).json({ error: 'Nao podes bloquear a tua propria conta' })
@@ -219,16 +210,14 @@ router.patch('/users/:id/block', adminMiddleware, async (req, res) => {
     res.json({ ok: true })
 })
 
-// ── DELETE /admin/users/:id ───────────────────────────────────────────────
 router.delete('/users/:id', adminMiddleware, async (req, res) => {
     if (parseInt(req.params.id) === req.user.id)
         return res.status(403).json({ error: 'Nao podes eliminar a tua propria conta' })
 
     const user = await db.query('SELECT is_admin FROM users WHERE id = $1', [req.params.id])
-    if (!user.rows[0])       return res.status(404).json({ error: 'Utilizador nao encontrado' })
+    if (!user.rows[0])        return res.status(404).json({ error: 'Utilizador nao encontrado' })
     if (user.rows[0].is_admin) return res.status(403).json({ error: 'Nao podes eliminar outro admin' })
 
-    // Eliminar dados associados em cascata
     await db.query('DELETE FROM notifications WHERE user_id = $1', [req.params.id])
     await db.query('DELETE FROM game_history   WHERE user_id = $1', [req.params.id])
     await db.query('DELETE FROM deposits       WHERE user_id = $1', [req.params.id])
@@ -238,15 +227,12 @@ router.delete('/users/:id', adminMiddleware, async (req, res) => {
     res.json({ ok: true })
 })
 
-// ── DELETE /admin/notifications/:id ──────────────────────────────────────
 router.delete('/notifications/:id', adminMiddleware, async (req, res) => {
     const result = await db.query('DELETE FROM notifications WHERE id = $1 RETURNING id', [req.params.id])
     if (!result.rows[0]) return res.status(404).json({ error: 'Notificacao nao encontrada' })
     res.json({ ok: true })
 })
 
-// ── DELETE /admin/notifications ───────────────────────────────────────────
-// Limpar todos os broadcasts (user_id IS NULL)
 router.delete('/notifications', adminMiddleware, async (req, res) => {
     const result = await db.query('DELETE FROM notifications WHERE user_id IS NULL RETURNING id')
     res.json({ ok: true, deleted: result.rowCount })
