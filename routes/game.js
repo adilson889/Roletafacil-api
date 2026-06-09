@@ -2,7 +2,6 @@ const router = require('express').Router()
 const db     = require('../db')
 const { authMiddleware } = require('../middleware/auth')
 
-// ── ROLETA ─────────────────────────────────────────────────────────────────
 const VERMELHO = [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]
 const PRETO    = [2,4,6,8,10,11,13,15,17,20,22,24,26,28,29,31,33,35]
 
@@ -35,14 +34,12 @@ router.post('/roleta/spin', authMiddleware, async (req, res) => {
 
   const { rows } = await db.query('SELECT * FROM users WHERE id = $1', [req.user.id])
   const user = rows[0]
-  if (!user)       return res.status(404).json({ error: 'Utilizador nao encontrado' })
+  if (!user)           return res.status(404).json({ error: 'Utilizador nao encontrado' })
   if (user.is_blocked) return res.status(403).json({ error: 'Conta bloqueada' })
   if (user.balance < aposta) return res.status(400).json({ error: 'Saldo insuficiente' })
 
-  // Sortear número no backend
-  const numero = Math.floor(Math.random() * 37) // 0 a 36
+  const numero = Math.floor(Math.random() * 37)
 
-  // Calcular payout
   let payout = 0
   if (tipo === 'exacto') {
     if (!numero_exacto && numero_exacto !== 0)
@@ -52,29 +49,27 @@ router.post('/roleta/spin', authMiddleware, async (req, res) => {
     payout = calcPayoutRoleta(numero, tipo, aposta)
   }
 
-  const delta      = payout - aposta
-  const novoSaldo  = user.balance + delta
+  const delta     = payout - aposta
+  const novoSaldo = user.balance + delta
 
   await db.query(
     'UPDATE users SET balance = $1, total_wagered = COALESCE(total_wagered,0) + $2 WHERE id = $3',
     [novoSaldo, aposta, req.user.id]
   )
-
   await db.query(
     `INSERT INTO game_sessions (user_id, bet_amount, bet_type, result, payout, jogo, status)
      VALUES ($1,$2,$3,$4,$5,'roleta','closed')`,
     [req.user.id, aposta, tipo, numero, payout]
   )
-
   await db.query(
     `INSERT INTO game_history (user_id, jogo, delta, saldo_depois) VALUES ($1,'roleta',$2,$3)`,
     [req.user.id, delta, novoSaldo]
   )
+  await actualizarTorneio(req.user.id, delta)
 
   res.json({ numero, payout, delta, balance: novoSaldo })
 })
 
-// ── MINES ──────────────────────────────────────────────────────────────────
 function calcMultiMines(abertas, nMinas) {
   if (abertas === 0) return 1
   const total = 25, seg = total - nMinas
@@ -97,24 +92,22 @@ router.post('/mines/start', authMiddleware, async (req, res) => {
   if (user.is_blocked) return res.status(403).json({ error: 'Conta bloqueada' })
   if (user.balance < aposta) return res.status(400).json({ error: 'Saldo insuficiente' })
 
-  // Fechar sessão aberta anterior se existir
   await db.query(
     `UPDATE game_sessions SET status='abandoned'
      WHERE user_id=$1 AND jogo='mines' AND status='open'`,
     [req.user.id]
   )
 
-  // Gerar minas no backend
   const minasSet = new Set()
   while (minasSet.size < n_minas) minasSet.add(Math.floor(Math.random() * 25))
   const minasPos = Array.from(minasSet)
 
-  // Debitar aposta imediatamente
   const novoSaldo = user.balance - aposta
-  await db.query('UPDATE users SET balance=$1, total_wagered=COALESCE(total_wagered,0)+$2 WHERE id=$3',
-    [novoSaldo, aposta, req.user.id])
+  await db.query(
+    'UPDATE users SET balance=$1, total_wagered=COALESCE(total_wagered,0)+$2 WHERE id=$3',
+    [novoSaldo, aposta, req.user.id]
+  )
 
-  // Criar sessão
   const sessao = await db.query(
     `INSERT INTO game_sessions
        (user_id, bet_amount, bet_type, result, payout, jogo, mines_pos, mines_abertas, n_minas, status)
@@ -145,7 +138,6 @@ router.post('/mines/reveal', authMiddleware, async (req, res) => {
   const ehMina = sessao.mines_pos.includes(celula)
 
   if (ehMina) {
-    // Fim de jogo — sem retorno
     await db.query(
       `UPDATE game_sessions SET status='lost', mines_abertas=$1 WHERE id=$2`,
       [[...abertas, celula], session_id]
@@ -155,6 +147,7 @@ router.post('/mines/reveal', authMiddleware, async (req, res) => {
       `INSERT INTO game_history (user_id, jogo, delta, saldo_depois) VALUES ($1,'mines',$2,$3)`,
       [req.user.id, -sessao.bet_amount, userR.rows[0].balance]
     )
+    await actualizarTorneio(req.user.id, -sessao.bet_amount)
     return res.json({
       mina: true,
       mines_pos: sessao.mines_pos,
@@ -162,7 +155,6 @@ router.post('/mines/reveal', authMiddleware, async (req, res) => {
     })
   }
 
-  // Casa segura
   const novasAbertas = [...abertas, celula]
   const multi        = calcMultiMines(novasAbertas.length, sessao.n_minas)
   const potencial    = Math.floor(sessao.bet_amount * multi)
@@ -173,9 +165,8 @@ router.post('/mines/reveal', authMiddleware, async (req, res) => {
     [novasAbertas, session_id]
   )
 
-  // Se abriu todas as casas seguras — cashout automático
   if (novasAbertas.length === seguras) {
-    const userR   = await db.query('SELECT balance FROM users WHERE id=$1', [req.user.id])
+    const userR     = await db.query('SELECT balance FROM users WHERE id=$1', [req.user.id])
     const novoSaldo = userR.rows[0].balance + potencial
     await db.query('UPDATE users SET balance=$1 WHERE id=$2', [novoSaldo, req.user.id])
     await db.query(
@@ -186,6 +177,7 @@ router.post('/mines/reveal', authMiddleware, async (req, res) => {
       `INSERT INTO game_history (user_id, jogo, delta, saldo_depois) VALUES ($1,'mines',$2,$3)`,
       [req.user.id, potencial - sessao.bet_amount, novoSaldo]
     )
+    await actualizarTorneio(req.user.id, potencial - sessao.bet_amount)
     return res.json({
       mina: false, auto_cashout: true,
       multi, potencial, balance: novoSaldo,
@@ -226,11 +218,11 @@ router.post('/mines/cashout', authMiddleware, async (req, res) => {
     `INSERT INTO game_history (user_id, jogo, delta, saldo_depois) VALUES ($1,'mines',$2,$3)`,
     [req.user.id, delta, novoSaldo]
   )
+  await actualizarTorneio(req.user.id, delta)
 
   res.json({ retorno, delta, balance: novoSaldo, mines_pos: sessao.mines_pos })
 })
 
-// ── HISTORY ────────────────────────────────────────────────────────────────
 router.get('/history', authMiddleware, async (req, res) => {
   const result = await db.query(
     `SELECT jogo, delta, saldo_depois, created_at FROM game_history
@@ -240,8 +232,6 @@ router.get('/history', authMiddleware, async (req, res) => {
   res.json(result.rows)
 })
 
-
-// ── RECENT WINS (Feed público autenticado) ─────────────────────────────────
 router.get('/recent-wins', authMiddleware, async (req, res) => {
   try {
     const { rows } = await db.query(
@@ -264,7 +254,7 @@ router.get('/recent-wins', authMiddleware, async (req, res) => {
     res.status(500).json({ error: 'Erro interno' })
   }
 })
-// ── TORNEIO: actualizar ranking após cada jogada ───────────────────────────
+
 async function actualizarTorneio(user_id, delta) {
   try {
     const t = await db.query(
