@@ -11,6 +11,9 @@ const withdrawalRoutes   = require('./routes/withdrawals')
 const referralRoutes = require('./routes/referral')
 const notificationRoutes = require('./routes/notifications')
 const adminRoutes        = require('./routes/admin')
+const analyticsRoutes = require('./routes/analytics')
+const rewardsRoutes   = require('./routes/rewards')
+
 const userRoutes = require('./routes/users')
 
 const app = express()
@@ -28,6 +31,8 @@ app.use('/admin',         adminRoutes)
 app.use('/users', userRoutes)
 app.use('/game', gameRoutes)
 app.use('/referral', referralRoutes)
+app.use('/analytics', analyticsRoutes)
+app.use('/rewards',   rewardsRoutes)
 
 app.get('/health', (_, res) => res.json({ status: 'ok' }))
 
