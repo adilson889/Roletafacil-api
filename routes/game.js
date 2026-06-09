@@ -240,4 +240,28 @@ router.get('/history', authMiddleware, async (req, res) => {
   res.json(result.rows)
 })
 
+
+// ── RECENT WINS (Feed público autenticado) ─────────────────────────────────
+router.get('/recent-wins', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await db.query(
+      `SELECT
+         u.name,
+         u.public_id,
+         gh.jogo,
+         gh.delta,
+         gh.created_at
+       FROM game_history gh
+       JOIN users u ON u.id = gh.user_id
+       WHERE gh.delta > 0
+         AND gh.user_id != $1
+       ORDER BY gh.created_at DESC
+       LIMIT 20`,
+      [req.user.id]
+    )
+    res.json(rows)
+  } catch (e) {
+    res.status(500).json({ error: 'Erro interno' })
+  }
+})
 module.exports = router
