@@ -264,4 +264,26 @@ router.get('/recent-wins', authMiddleware, async (req, res) => {
     res.status(500).json({ error: 'Erro interno' })
   }
 })
+// ── TORNEIO: actualizar ranking após cada jogada ───────────────────────────
+async function actualizarTorneio(user_id, delta) {
+  try {
+    const t = await db.query(
+      `SELECT id FROM tournaments WHERE status = 'active' ORDER BY iniciado_em DESC LIMIT 1`
+    )
+    if (!t.rows[0]) return
+    const tid = t.rows[0].id
+
+    await db.query(
+      `INSERT INTO tournament_entries (tournament_id, user_id, lucro_total, partidas, updated_at)
+       VALUES ($1, $2, $3, 1, NOW())
+       ON CONFLICT (tournament_id, user_id)
+       DO UPDATE SET
+         lucro_total = tournament_entries.lucro_total + $3,
+         partidas    = tournament_entries.partidas + 1,
+         updated_at  = NOW()`,
+      [tid, user_id, delta]
+    )
+  } catch (e) {}
+}
+
 module.exports = router
