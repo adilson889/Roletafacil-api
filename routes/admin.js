@@ -238,4 +238,106 @@ router.delete('/notifications', adminMiddleware, async (req, res) => {
     res.json({ ok: true, deleted: result.rowCount })
 })
 
+
+// ── TORNEIOS ───────────────────────────────────────────────────────────────
+
+// Ver torneio activo e ranking
+router.get('/tournament', adminMiddleware, async (req, res) => {
+  const t = await db.query(
+    `SELECT * FROM tournaments WHERE status = 'active' ORDER BY iniciado_em DESC LIMIT 1`
+  )
+  if (!t.rows[0]) return res.json({ torneio: null, ranking: [] })
+
+  const ranking = await db.query(
+    `SELECT u.name, u.public_id, te.lucro_total, te.partidas
+     FROM tournament_entries te
+     JOIN users u ON u.id = te.user_id
+     WHERE te.tournament_id = $1
+     ORDER BY te.lucro_total DESC LIMIT 10`,
+    [t.rows[0].id]
+  )
+
+  res.json({ torneio: t.rows[0], ranking: ranking.rows })
+})
+
+// Actualizar prémio do torneio activo
+router.patch('/tournament/premio', adminMiddleware, async (req, res) => {
+  const { premio } = req.body
+  if (!premio || premio < 100)
+    return res.status(400).json({ error: 'Premio minimo 100 KZ' })
+
+  const t = await db.query(
+    `UPDATE tournaments SET premio = $1
+     WHERE status = 'active'
+     RETURNING *`,
+    [premio]
+  )
+  if (!t.rows[0]) return res.status(404).json({ error: 'Nenhum torneio activo' })
+  res.json({ ok: true, torneio: t.rows[0] })
+})
+
+// Encerrar torneio e pagar prémios
+router.post('/tournament/encerrar', adminMiddleware, async (req, res) => {
+  const t = await db.query(
+    `SELECT * FROM tournaments WHERE status = 'active' ORDER BY iniciado_em DESC LIMIT 1`
+  )
+  if (!t.rows[0]) return res.status(404).json({ error: 'Nenhum torneio activo' })
+  const torneio = t.rows[0]
+
+  // Top 3
+  const ranking = await db.query(
+    `SELECT te.user_id, te.lucro_total
+     FROM tournament_entries te
+     WHERE te.tournament_id = $1 AND te.lucro_total > 0
+     ORDER BY te.lucro_total DESC LIMIT 3`,
+    [torneio.id]
+  )
+
+  const percentagens = [0.60, 0.30, 0.10]
+  const pagos = []
+
+  for (let i = 0; i < ranking.rows.length; i++) {
+    const entry  = ranking.rows[i]
+    const valor  = Math.floor(torneio.premio * percentagens[i])
+    const lugar  = i + 1
+    const emoji  = ['🥇', '🥈', '🥉'][i]
+
+    await db.query('UPDATE users SET balance = balance + $1 WHERE id = $2', [valor, entry.user_id])
+    await db.query(
+      `INSERT INTO notifications (user_id, title, body, type) VALUES ($1, $2, $3, 'success')`,
+      [entry.user_id,
+       `${emoji} Torneio Diário — ${lugar}º Lugar!`,
+       `Parabéns! Ficaste em ${lugar}º lugar no torneio de hoje e ganhaste ${valor} KZ.`]
+    )
+    pagos.push({ user_id: entry.user_id, lugar, valor })
+  }
+
+  // Encerrar torneio actual e criar novo
+  await db.query(
+    `UPDATE tournaments SET status = 'closed', encerrado_em = NOW() WHERE id = $1`,
+    [torneio.id]
+  )
+  await db.query(`INSERT INTO tournaments (premio, status) VALUES ($1, 'active')`, [torneio.premio])
+
+  res.json({ ok: true, pagos })
+})
+
+// Endpoint público (autenticado) — ranking do torneio activo
+router.get('/tournament/public', async (req, res) => {
+  const t = await db.query(
+    `SELECT id, premio, iniciado_em FROM tournaments WHERE status = 'active' ORDER BY iniciado_em DESC LIMIT 1`
+  )
+  if (!t.rows[0]) return res.json({ torneio: null, ranking: [] })
+
+  const ranking = await db.query(
+    `SELECT u.name, u.public_id, te.lucro_total, te.partidas
+     FROM tournament_entries te
+     JOIN users u ON u.id = te.user_id
+     WHERE te.tournament_id = $1 AND te.lucro_total > 0
+     ORDER BY te.lucro_total DESC LIMIT 10`,
+    [t.rows[0].id]
+  )
+
+  res.json({ torneio: t.rows[0], ranking: ranking.rows })
+})
 module.exports = router
