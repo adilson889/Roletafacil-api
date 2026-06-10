@@ -12,15 +12,6 @@ router.get('/', authMiddleware, async (req, res) => {
     res.json(result.rows)
 })
 
-router.get('/unread-count', authMiddleware, async (req, res) => {
-    const result = await db.query(
-        `SELECT COUNT(*) FROM notifications
-         WHERE (user_id = $1 OR user_id IS NULL) AND is_read = false`,
-        [req.user.id]
-    )
-    res.json({ count: parseInt(result.rows[0].count) })
-})
-
 router.get('/promos', authMiddleware, async (req, res) => {
     const result = await db.query(
         `SELECT * FROM notifications
@@ -30,13 +21,13 @@ router.get('/promos', authMiddleware, async (req, res) => {
     res.json(result.rows)
 })
 
-router.patch('/:id/read', authMiddleware, async (req, res) => {
-    await db.query(
-        `UPDATE notifications SET is_read = true
-         WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)`,
-        [req.params.id, req.user.id]
+router.get('/unread-count', authMiddleware, async (req, res) => {
+    const result = await db.query(
+        `SELECT COUNT(*) FROM notifications
+         WHERE (user_id = $1 OR user_id IS NULL) AND is_read = false`,
+        [req.user.id]
     )
-    res.json({ ok: true })
+    res.json({ count: parseInt(result.rows[0].count) })
 })
 
 router.patch('/read-all', authMiddleware, async (req, res) => {
@@ -44,6 +35,15 @@ router.patch('/read-all', authMiddleware, async (req, res) => {
         `UPDATE notifications SET is_read = true
          WHERE (user_id = $1 OR user_id IS NULL) AND is_read = false`,
         [req.user.id]
+    )
+    res.json({ ok: true })
+})
+
+router.patch('/:id/read', authMiddleware, async (req, res) => {
+    await db.query(
+        `UPDATE notifications SET is_read = true
+         WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)`,
+        [req.params.id, req.user.id]
     )
     res.json({ ok: true })
 })
