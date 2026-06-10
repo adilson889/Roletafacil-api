@@ -25,6 +25,8 @@ router.post('/roleta/spin', authMiddleware, async (req, res) => {
 
   if (!aposta || aposta < 10)
     return res.status(400).json({ error: 'Aposta minima 10 KZ' })
+  if (aposta > 500)
+    return res.status(400).json({ error: 'Aposta maxima 500 KZ' })
   if (!tipo)
     return res.status(400).json({ error: 'Tipo de aposta em falta' })
 
